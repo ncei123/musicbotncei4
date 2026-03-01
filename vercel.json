@@ -4,24 +4,28 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python"
-    },
-    {
-      "src": "static/**",
-      "use": "@vercel/static"
     }
   ],
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
       "source": "/search",
-      "destination": "api/index.py"
+      "destination": "/api/index.py"
     },
     {
       "source": "/stream",
-      "destination": "api/index.py"
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/",
+      "destination": "/static/index.html"
     },
     {
       "source": "/(.*)",
-      "destination": "static/$1"
+      "destination": "/static/$1"
     }
   ]
 }

@@ -102,3 +102,7 @@ os.makedirs("static", exist_ok=True)
 # Mount the static files at the end of the file so that API routes have priority
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
+if __name__ == "__main__":
+    import uvicorn
+    # Запускаем сервер uvicorn на порту 8000
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
