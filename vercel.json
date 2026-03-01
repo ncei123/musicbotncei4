@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "static/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/search",
+      "destination": "api/index.py"
+    },
+    {
+      "source": "/stream",
+      "destination": "api/index.py"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "static/$1"
+    }
+  ]
+}
