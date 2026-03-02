@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,7 +24,11 @@ async def search_youtube(query: str, limit: int = 5):
         'noplaylist': True,
         'quiet': True,
         'extract_flat': True,
+        'extractor_args': {'youtube': ['player_client=mweb,android,ios']},
     }
+    proxy = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
+    if proxy:
+        ydl_opts['proxy'] = proxy
     
     def fetch():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -62,10 +66,14 @@ async def get_audio_url(video_id: str):
         'format': 'bestaudio/best',
         'quiet': True,
         'noplaylist': True,
+        'extractor_args': {'youtube': ['player_client=mweb,android,ios']},
     }
+    proxy = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
+    if proxy:
+        ydl_opts['proxy'] = proxy
     def fetch():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(video_id, download=False)
+            return ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             
     try:
         info = await asyncio.to_thread(fetch)
@@ -76,21 +84,46 @@ async def get_audio_url(video_id: str):
 
 @app.get("/api/stream")
 @app.get("/stream")
-async def stream(video_id: str):
+async def stream(video_id: str, request: Request):
     audio_url = await get_audio_url(video_id)
     if not audio_url:
         raise HTTPException(status_code=404, detail="Audio not found")
         
-    async def stream_generator():
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream('GET', audio_url) as response:
-                if response.status_code != 200:
-                    yield b""
-                    return
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+    client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    
+    headers = {
+        "User-Agent": request.headers.get("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"),
+    }
+    if "range" in request.headers:
+        headers["Range"] = request.headers["range"]
 
-    return StreamingResponse(stream_generator(), media_type="audio/mpeg")
+    req = client.build_request("GET", audio_url, headers=headers)
+    response = await client.send(req, stream=True)
+
+    if response.status_code >= 400:
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=response.status_code, detail="Error fetching from YouTube")
+
+    async def stream_generator():
+        try:
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                yield chunk
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    resp_headers = {}
+    for k, v in response.headers.items():
+        if k.lower() in ("content-type", "content-length", "content-range", "accept-ranges"):
+            resp_headers[k] = v
+
+    return StreamingResponse(
+        stream_generator(),
+        status_code=response.status_code,
+        headers=resp_headers,
+        media_type=resp_headers.get("Content-Type", "audio/mpeg")
+    )
 
 @app.get("/api/health")
 async def health():
