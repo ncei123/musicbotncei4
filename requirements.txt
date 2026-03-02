@@ -1,5 +1,4 @@
 fastapi
 uvicorn
-# Force latest version to bypass youtube bot detection caching
-yt-dlp>=2024.11.0
+pytubefix
 httpx

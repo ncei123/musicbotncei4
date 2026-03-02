@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-import yt_dlp
+from pytubefix import YouTube, Search
 import asyncio
 import httpx
 import os
@@ -19,38 +19,25 @@ app.add_middleware(
 )
 
 async def search_youtube(query: str, limit: int = 5):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-        'extract_flat': True,
-        'extractor_args': {'youtube': ['player_client=mweb,android,ios']},
-    }
-    proxy = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
-    if proxy:
-        ydl_opts['proxy'] = proxy
-    
     def fetch():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
-            
-    info = await asyncio.to_thread(fetch)
-    
-    results = []
-    if 'entries' in info:
-        for entry in info['entries']:
-            thumbnail = entry.get("thumbnail")
-            if not thumbnail and entry.get("thumbnails"):
-                thumbnail = entry["thumbnails"][0].get("url")
-                
+        s = Search(query)
+        results = []
+        for v in s.videos[:limit]:
             results.append({
-                "id": entry.get("id"),
-                "title": entry.get("title"),
-                "artist": entry.get("uploader", "Unknown Artist"),
-                "duration": entry.get("duration", 0),
-                "thumbnail": thumbnail,
+                "id": v.video_id,
+                "title": v.title,
+                "artist": v.author,
+                "duration": v.length,
+                "thumbnail": v.thumbnail_url
             })
-    return results
+        return results
+            
+    try:
+        results = await asyncio.to_thread(fetch)
+        return results
+    except Exception as e:
+        print(f"Error searching: {e}")
+        return []
 
 @app.get("/api/search")
 @app.get("/search")
@@ -62,24 +49,19 @@ async def search(q: str = Query(..., min_length=1)):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def get_audio_url(video_id: str):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'noplaylist': True,
-        'extractor_args': {'youtube': ['player_client=mweb,android,ios']},
-    }
-    proxy = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
-    if proxy:
-        ydl_opts['proxy'] = proxy
     def fetch():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        # Get the best audio stream
+        stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        if not stream:
+            stream = yt.streams.filter(only_audio=True).first()
+        return stream.url if stream else None
             
     try:
-        info = await asyncio.to_thread(fetch)
-        return info.get('url')
+        url = await asyncio.to_thread(fetch)
+        return url
     except Exception as e:
-        print(f"Error fetching audio URL: {e}")
+        print(f"Error fetching audio URL via pytubefix: {e}")
         return None
 
 @app.get("/api/stream")
