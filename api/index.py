@@ -56,7 +56,7 @@ async def get_audio_url(video_id: str):
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
     
     def fetch():
-        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}", client='WEB', proxies=proxies)
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}", client='ANDROID', proxies=proxies)
         # Get the best audio stream
         stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
         if not stream:
