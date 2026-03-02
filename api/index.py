@@ -19,8 +19,11 @@ app.add_middleware(
 )
 
 async def search_youtube(query: str, limit: int = 5):
+    proxy_url = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    
     def fetch():
-        s = Search(query)
+        s = Search(query, proxies=proxies)
         results = []
         for v in s.videos[:limit]:
             results.append({
@@ -49,8 +52,11 @@ async def search(q: str = Query(..., min_length=1)):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def get_audio_url(video_id: str):
+    proxy_url = os.environ.get("YOUTUBE_PROXY", "http://77W4fK:GXZ13y@196.18.13.81:8000")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    
     def fetch():
-        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}", client='WEB', proxies=proxies)
         # Get the best audio stream
         stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
         if not stream:
