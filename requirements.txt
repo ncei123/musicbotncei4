@@ -1,0 +1,7 @@
+﻿fastapi
+uvicorn
+yt-dlp
+httpx
+python-multipart
+python-telegram-bot
+python-dotenv
