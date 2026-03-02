@@ -5,7 +5,7 @@ import httpx
 import asyncio
 import random
 
-app = FastAPI(title="Telegram Music Bot MVP API")
+app = FastAPI(title="Telegram Music Bot MVP API (Invidious)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,120 +15,107 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Public Piped API instances (используем несколько на случай недоступности одного)
-PIPED_INSTANCES = [
-    "https://pipedapi.kavin.rocks",
-    "https://piped-api.privacy.com.de",
-    "https://api.piped.yt",
-    "https://pipedapi.reallyaweso.me",
+INVIDIOUS_INSTANCES = [
+    "https://inv.tux.pizza",
+    "https://invidious.private.coffee",
+    "https://invidious.fdn.fr",
+    "https://invidious.perennialte.ch",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.jing.rocks",
+    "https://vid.priv.au",
+    "https://invidious.privacyredirect.com",
+    "https://iv.melmac.space"
 ]
 
-async def get_piped_instance(client: httpx.AsyncClient) -> str:
-    """Возвращает первый доступный Piped instance."""
-    for instance in PIPED_INSTANCES:
-        try:
-            r = await client.get(f"{instance}/healthcheck", timeout=3.0)
-            if r.status_code == 200:
-                return instance
-        except Exception:
-            continue
-    # Если ни один не ответил на healthcheck — берём случайный
-    return random.choice(PIPED_INSTANCES)
-
-
-async def search_piped(query: str, limit: int = 10) -> list:
-    """Поиск треков через Piped API."""
+async def search_invidious(query: str, limit: int = 10) -> list:
+    """Поиск треков через Invidious API с перебором инстансов."""
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-        instance = await get_piped_instance(client)
-        try:
-            resp = await client.get(
-                f"{instance}/search",
-                params={"q": query, "filter": "music_songs"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            
-            results = []
-            for item in data.get("items", [])[:limit]:
-                # Piped возвращает url вида /watch?v=VIDEO_ID
-                video_url = item.get("url", "")
-                video_id = video_url.split("v=")[-1] if "v=" in video_url else ""
-                
-                if not video_id:
-                    continue
-
-                # Длительность в секундах
-                duration = item.get("duration", 0)
-
-                results.append({
-                    "id": video_id,
-                    "title": item.get("title", "Unknown Title"),
-                    "artist": item.get("uploaderName", "Unknown Artist"),
-                    "duration": duration,
-                    "thumbnail": item.get("thumbnail", ""),
-                })
-            return results
-
-        except Exception as e:
-            print(f"[Piped search error] instance={instance}, error={e}")
-            # Пробуем другой instance
-            for fallback in PIPED_INSTANCES:
-                if fallback == instance:
-                    continue
-                try:
-                    resp = await client.get(
-                        f"{fallback}/search",
-                        params={"q": query, "filter": "music_songs"},
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    results = []
-                    for item in data.get("items", [])[:limit]:
-                        video_url = item.get("url", "")
-                        video_id = video_url.split("v=")[-1] if "v=" in video_url else ""
-                        if not video_id:
-                            continue
-                        results.append({
-                            "id": video_id,
-                            "title": item.get("title", "Unknown Title"),
-                            "artist": item.get("uploaderName", "Unknown Artist"),
-                            "duration": item.get("duration", 0),
-                            "thumbnail": item.get("thumbnail", ""),
-                        })
-                    return results
-                except Exception as e2:
-                    print(f"[Piped fallback error] instance={fallback}, error={e2}")
-                    continue
-            return []
-
-
-async def get_audio_url_piped(video_id: str) -> str | None:
-    """Получаем прямую ссылку на аудио через Piped API."""
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        instance = await get_piped_instance(client)
+        instances = list(INVIDIOUS_INSTANCES)
+        random.shuffle(instances)
         
-        for attempt_instance in [instance] + [i for i in PIPED_INSTANCES if i != instance]:
+        for instance in instances:
             try:
-                resp = await client.get(f"{attempt_instance}/streams/{video_id}")
+                resp = await client.get(
+                    f"{instance}/api/v1/search",
+                    params={"q": query, "type": "video"},
+                )
                 resp.raise_for_status()
                 data = resp.json()
                 
-                audio_streams = data.get("audioStreams", [])
+                results = []
+                for item in data[:limit]:
+                    video_id = item.get("videoId")
+                    if not video_id:
+                        continue
+
+                    duration = item.get("lengthSeconds", 0)
+                    thumbnails = item.get("videoThumbnails", [])
+                    thumbnail_url = thumbnails[-1]["url"] if thumbnails else ""
+                    
+                    if thumbnail_url and thumbnail_url.startswith("/"):
+                        thumbnail_url = f"{instance}{thumbnail_url}"
+
+                    results.append({
+                        "id": video_id,
+                        "title": item.get("title", "Unknown Title"),
+                        "artist": item.get("author", "Unknown Artist"),
+                        "duration": duration,
+                        "thumbnail": thumbnail_url,
+                    })
+                
+                if results:
+                    return results
+                    
+            except Exception as e:
+                print(f"[Invidious search error] instance={instance}, error={e}")
+                continue
+        
+        return []
+
+async def get_audio_url_invidious(video_id: str) -> str | None:
+    """Получаем прямую ссылку на аудио через Invidious API."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        instances = list(INVIDIOUS_INSTANCES)
+        random.shuffle(instances)
+        
+        for instance in instances:
+            try:
+                resp = await client.get(f"{instance}/api/v1/videos/{video_id}")
+                resp.raise_for_status()
+                data = resp.json()
+                
+                adaptive_formats = data.get("adaptiveFormats", [])
+                format_streams = data.get("formatStreams", [])
+                
+                all_formats = adaptive_formats + format_streams
+                
+                audio_streams = [f for f in all_formats if "audio" in f.get("type", "").lower()]
                 if not audio_streams:
                     continue
 
-                # Выбираем лучший аудио поток (сортируем по битрейту)
+                def get_bitrate(s):
+                    try:
+                        return int(s.get("bitrate", 0))
+                    except (ValueError, TypeError):
+                        return 0
+
+                # Выбираем лучший аудио поток
                 audio_streams_sorted = sorted(
                     audio_streams,
-                    key=lambda s: s.get("bitrate", 0),
+                    key=get_bitrate,
                     reverse=True
                 )
                 
                 best = audio_streams_sorted[0]
-                return best.get("url")
+                url = best.get("url")
+                
+                if url and url.startswith("/"):
+                    url = f"{instance}{url}"
+                    
+                return url
 
             except Exception as e:
-                print(f"[Piped streams error] instance={attempt_instance}, video={video_id}, error={e}")
+                print(f"[Invidious streams error] instance={instance}, video={video_id}, error={e}")
                 continue
 
     return None
@@ -140,24 +127,21 @@ async def get_audio_url_piped(video_id: str) -> str | None:
 @app.get("/search")
 async def search(q: str = Query(..., min_length=1)):
     try:
-        results = await search_piped(q)
+        results = await search_invidious(q)
         return {"results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/stream")
 @app.get("/stream")
 async def stream(video_id: str, request: Request):
-    audio_url = await get_audio_url_piped(video_id)
+    audio_url = await get_audio_url_invidious(video_id)
     
     if not audio_url:
         raise HTTPException(status_code=404, detail="Audio stream not found")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.youtube.com/",
-        "Origin": "https://www.youtube.com",
     }
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
@@ -191,7 +175,6 @@ async def stream(video_id: str, request: Request):
         media_type=resp_headers.get("content-type", "audio/webm"),
     )
 
-
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "provider": "invidious"}
